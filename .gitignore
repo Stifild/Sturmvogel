@@ -7,3 +7,6 @@ env.json
 __pycache__/
 *.log
 .*/
+build/
+dist/
+*.spec
