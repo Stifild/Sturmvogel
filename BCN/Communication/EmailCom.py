@@ -63,6 +63,9 @@ class EmailCommunicator:
         self.my_address = None
         # Добавляем хранение информации о последних командах для улучшенного ACK
         self.last_commands = {}  # Словарь для хранения информации о последних отправленных командах
+        # Добавляем счетчик для индексации широковещательных сообщений
+        self.broadcast_index = 0  # Счетчик для индексации широковещательных сообщений
+        self.processed_broadcast_indexes = set()  # Множество для хранения обработанных индексов
         logging.info("EmailCommunicator initialized with no address")
 
     def set_my_address(self, address):
@@ -92,7 +95,18 @@ class EmailCommunicator:
         If flag is IC, store command information for ACK tracking
         """
         import socket
-        message = f"From: {self.emailAddress}\nTo: {self.emailAddress}\nSubject: 0.0.0:{address}:{flag}\n\n{log_message}(|||){compile_command(flag, command)}"
+        
+        # Формируем тему письма, для широковещательных сообщений добавляем индекс
+        if address == "255.255.255":
+            # Увеличиваем счетчик индекса для широковещательных сообщений
+            self.broadcast_index += 1
+            # Добавляем индекс в адрес для широковещательных сообщений
+            subject = f"0.0.0:{address}#{self.broadcast_index}:{flag}"
+            logging.info(f"Broadcasting message with index #{self.broadcast_index}")
+        else:
+            subject = f"0.0.0:{address}:{flag}"
+        
+        message = f"From: {self.emailAddress}\nTo: {self.emailAddress}\nSubject: {subject}\n\n{log_message}(|||){compile_command(flag, command)}"
         
         # Сохраняем информацию о команде для последующего отслеживания ACK, если это команда (IC)
         if flag == "IC" and address != "0.0.0":  # Не отслеживаем команды, отправленные на сервер
@@ -178,12 +192,34 @@ class EmailCommunicator:
             # Разбор заголовка для получения адреса и флага
             address = "0.0.0"  # Значение по умолчанию
             flag = "IND"       # Значение по умолчанию
+            broadcast_index = 0  # Значение по умолчанию
             
+            # Parse subject to get address and flag (expected format: address:flag)
             if subject and ':' in subject:
                 parts = subject.split(':')
                 if len(parts) >= 3:
-                    address = parts[1].strip()
+                    # Извлекаем адрес и проверяем, содержит ли он индекс (для широковещательных сообщений)
+                    raw_address = parts[1].strip()
+                    if '#' in raw_address and raw_address.startswith("255.255.255"):
+                        # Широковещательное сообщение с индексом
+                        address_parts = raw_address.split('#')
+                        address = address_parts[0]  # 255.255.255
+                        broadcast_index = int(address_parts[1]) if len(address_parts) > 1 and address_parts[1].isdigit() else 0
+                        logging.info(f"Detected broadcast message with index #{broadcast_index}")
+                    else:
+                        # Обычное сообщение без индекса
+                        address = raw_address
+                        broadcast_index = 0
+                    
                     flag = parts[2].strip()
+                else:
+                    address = "0.0.0"
+                    flag = "IND"  # Default flag
+                    broadcast_index = 0
+            else:
+                address = "0.0.0"
+                flag = "IND"  # Default flag
+                broadcast_index = 0
             
             # Извлечение команды из содержимого письма
             command = None
@@ -267,17 +303,35 @@ class EmailCommunicator:
                     logging.debug(f"Email subject: {subject}")
                     
                     # Parse subject to get address and flag (expected format: address:flag)
+                    address = "0.0.0"  # Значение по умолчанию
+                    flag = "IND"       # Значение по умолчанию
+                    broadcast_index = 0  # Значение по умолчанию
+                    
                     if subject and ':' in subject:
                         parts = subject.split(':')
                         if len(parts) >= 3:
-                            address = parts[1].strip()
+                            # Извлекаем адрес и проверяем, содержит ли он индекс (для широковещательных сообщений)
+                            raw_address = parts[1].strip()
+                            if '#' in raw_address and raw_address.startswith("255.255.255"):
+                                # Широковещательное сообщение с индексом
+                                address_parts = raw_address.split('#')
+                                address = address_parts[0]  # 255.255.255
+                                broadcast_index = int(address_parts[1]) if len(address_parts) > 1 and address_parts[1].isdigit() else 0
+                                logging.info(f"Detected broadcast message with index #{broadcast_index}")
+                            else:
+                                # Обычное сообщение без индекса
+                                address = raw_address
+                                broadcast_index = 0
+                            
                             flag = parts[2].strip()
                         else:
                             address = "0.0.0"
                             flag = "IND"  # Default flag
+                            broadcast_index = 0
                     else:
                         address = "0.0.0"
                         flag = "IND"  # Default flag
+                        broadcast_index = 0
                     
                     # Извлечь содержимое письма для случая двойного IND::::
                     if "IND::::IND::::" in payload:
@@ -447,10 +501,57 @@ class EmailCommunicator:
                             # Возвращаем команду и флаг для обработки
                             return command, flag
                         else:
-                            # Все остальные сообщения просто удаляем
-                            mail.store(latest_email_id, "+FLAGS", "\\Deleted")
-                            mail.expunge()
-                            logging.info(f"📮 Deleted message after processing: address={address}, flag={flag}")
+                            # Проверяем, является ли сообщение широковещательным (255.255.255)
+                            # Если да, проверяем индекс и обрабатываем только новые сообщения
+                            if address == "255.255.255":
+                                # Для широковещательных сообщений проверяем индекс
+                                if broadcast_index > 0:
+                                    # Если индекс уже обработан, пропускаем сообщение
+                                    if broadcast_index in self.processed_broadcast_indexes:
+                                        logging.info(f"📩 Skipping already processed broadcast message with index #{broadcast_index}")
+                                        # Оставляем сообщение в почтовом ящике для обработки другими получателями
+                                        return 0, 0
+                                    else:
+                                        # Сообщение с новым индексом, обрабатываем его
+                                        logging.info(f"📬 Processing new broadcast message with index #{broadcast_index}")
+                                        # Добавляем индекс в множество обработанных
+                                        self.processed_broadcast_indexes.add(broadcast_index)
+                                        
+                                        # Просто возвращаем результат обработки, но не удаляем сообщение
+                                        if flag == "IC" and not is_server_mode:
+                                            # Для команд в режиме подчиненного узла
+                                            return (command, flag, latest_email_id)
+                                        else:
+                                            # Для других типов сообщений
+                                            return command, flag
+                                else:
+                                    # Старый формат без индекса (для обратной совместимости)
+                                    logging.info(f"📬 Processing broadcast message without index (old format)")
+                                    
+                                    # Добавляем проверку Message-ID письма, чтобы не обрабатывать одно и то же письмо дважды
+                                    message_id = email_message.get('Message-ID', 'no-id')
+                                    if message_id != 'no-id' and message_id in self.processed_broadcast_indexes:
+                                        logging.info(f"📩 Skipping already processed broadcast message with Message-ID: {message_id}")
+                                        # Оставляем сообщение в почтовом ящике для обработки другими получателями
+                                        return 0, 0
+                                    else:
+                                        # Сохраняем Message-ID в множество обработанных
+                                        if message_id != 'no-id':
+                                            self.processed_broadcast_indexes.add(message_id)
+                                            logging.info(f"Adding Message-ID to processed set: {message_id}")
+                                        
+                                        # Просто возвращаем результат обработки, но не удаляем сообщение
+                                        if flag == "IC" and not is_server_mode:
+                                            # Для команд в режиме подчиненного узла
+                                            return (command, flag, latest_email_id)
+                                        else:
+                                            # Для других типов сообщений
+                                            return command, flag
+                            else:
+                                # Все остальные сообщения просто удаляем после обработки
+                                mail.store(latest_email_id, "+FLAGS", "\\Deleted")
+                                mail.expunge()
+                                logging.info(f"📮 Deleted message after processing: address={address}, flag={flag}")
                     else:
                         # Если сообщение НЕ адресовано нам, оставляем его в почтовом ящике
                         logging.info(f"📪 Left message in mailbox: address={address}, flag={flag} (not addressed to us)")

@@ -145,8 +145,8 @@ def initiate_suboard():
     received_address = False
     
     logging.info("Waiting for server to assign network address...")
-    # Try to get assigned address (timeout after 30 seconds)
-    timeout = time.time() + 30
+    # Try to get assigned address (timeout after 60 seconds)
+    timeout = time.time() + 60
     
     # Логируем текущее состояние адреса
     logging.info(f"Current address setting: {bcn.my_address}")
@@ -154,39 +154,126 @@ def initiate_suboard():
     # Даем серверу время на обработку запроса и отправку ответа
     time.sleep(3)
 
+    # Улучшенный цикл ожидания ответа от сервера
+    error_count = 0
     while not received_address and time.time() < timeout:
-        if bcn.check_for_messages():
-            # Используем обновленный метод receive(), который теперь просматривает все сообщения
-            # и удаляет те, которые обработаны
-            response, flag = bcn.receive()
-            logging.info(f"Received response with flag: {flag}, content: {response}")
-            
-            # Проверяем, был ли установлен адрес после обработки сообщения
-            if bcn.my_address:
-                logging.info(f"Address was set through message processing: {bcn.my_address}")
-                my_address = bcn.my_address
-                received_address = True
-                # Отправляем подтверждение серверу
-                bcn.send(
-                    my_address,
-                    "0.0.0",
-                    "ACK",
-                    f"Address {my_address} acknowledged by {computer_name}"
-                )
-                break
-        time.sleep(1)
+        try:
+            if bcn.check_for_messages():
+                # Проверяем, есть ли сообщения в ящике
+                logging.info("New messages detected, checking for address assignment...")
+                
+                # Получаем сообщение
+                try:
+                    # Используем обновленный метод receive(), который теперь просматривает все сообщения
+                    # и удаляет те, которые обработаны
+                    response, flag = bcn.receive()
+                    logging.info(f"Received response with flag: {flag}, content: {response}")
+                    
+                    # Проверяем, является ли ответ информационным сообщением с адресом (INF)
+                    if flag == "INF" and isinstance(response, str):
+                        logging.info(f"Processing INF message: {response}")
+                        
+                        # Пытаемся извлечь адрес из ответа
+                        try:
+                            if ", " in response:
+                                address_part, name_part = response.split(", ", 1)
+                                potential_address = address_part.strip()
+                                
+                                # Дополнительная проверка формата адреса x.x.x
+                                if potential_address.count('.') == 2 and all(part.isdigit() for part in potential_address.split('.')):
+                                    # Проверяем, что имя компьютера совпадает с нашим
+                                    if name_part.strip() == computer_name:
+                                        logging.info(f"✅ Address assigned: {potential_address}")
+                                        my_address = potential_address
+                                        bcn.set_my_address(my_address)
+                                        received_address = True
+                                        
+                                        # Отправляем подтверждение серверу
+                                        bcn.send(
+                                            f"Address {my_address} acknowledged by {computer_name}",
+                                            "0.0.0",
+                                            "ACK",
+                                            f"Address {my_address} acknowledged by {computer_name}"
+                                        )
+                                        logging.info(f"✉️ ACK sent to server for address: {my_address}")
+                                        break
+                                    else:
+                                        logging.warning(f"Received address for different computer: {name_part} != {computer_name}")
+                                else:
+                                    logging.warning(f"Invalid address format in INF message: {potential_address}")
+                            else:
+                                logging.warning(f"INF message has unexpected format: {response}")
+                        except Exception as parse_error:
+                            logging.error(f"Error parsing INF message: {parse_error}")
+                            
+                    # Проверяем, был ли установлен адрес через EmailCommunicator
+                    if bcn.my_address:
+                        logging.info(f"Address was set through EmailCommunicator: {bcn.my_address}")
+                        my_address = bcn.my_address
+                        received_address = True
+                        # Отправляем подтверждение, если еще не отправляли
+                        if flag != "INF":
+                            bcn.send(
+                                f"Address {my_address} acknowledged by {computer_name}",
+                                "0.0.0",
+                                "ACK",
+                                f"Address {my_address} acknowledged by {computer_name}"
+                            )
+                            logging.info(f"✉️ ACK sent to server for address (detected through EmailCommunicator): {my_address}")
+                        break
+                except Exception as receive_error:
+                    logging.error(f"Error receiving or processing message: {receive_error}")
+                    error_count += 1
+                    if error_count >= 3:
+                        logging.warning(f"Too many consecutive errors ({error_count}), sleeping longer...")
+                        time.sleep(5)  # Увеличиваем время ожидания при ошибках
+                    else:
+                        time.sleep(1)
+            else:
+                # Если сообщений нет, ждем немного и проверяем снова
+                time.sleep(2)
+                
+                # Периодически уведомляем о процессе ожидания
+                if int(time.time()) % 10 == 0:  # каждые ~10 секунд
+                    remaining = int(timeout - time.time())
+                    logging.info(f"Still waiting for address assignment... timeout in {remaining} seconds")
+                
+                # Повторно проверяем, не был ли адрес установлен через EmailCommunicator
+                if bcn.my_address:
+                    logging.info(f"Address was set through EmailCommunicator while waiting: {bcn.my_address}")
+                    my_address = bcn.my_address
+                    received_address = True
+                    
+                    # Добавляем проверку на None перед отправкой подтверждения
+                    if my_address is not None:
+                        try:
+                            bcn.send(
+                                f"Address {my_address} acknowledged by {computer_name}",
+                                "0.0.0",
+                                "ACK",
+                                f"Address {my_address} acknowledged by {computer_name}"
+                            )
+                            logging.info(f"✉️ ACK sent to server for address: {my_address}")
+                        except Exception as send_error:
+                            logging.error(f"Error sending ACK: {send_error}")
+                    else:
+                        logging.warning("Skipping ACK sending - address is None")
+                    break
+        except Exception as cycle_error:
+            logging.error(f"Error in address wait cycle: {cycle_error}")
+            time.sleep(3)
     
     # Проверяем, установлен ли адрес через EmailCommunicator, даже если received_address = False
     if not received_address and bcn.my_address:
-        logging.info(f"Address was set through EmailCommunicator: {bcn.my_address}")
+        logging.info(f"Address was set through EmailCommunicator after wait loop: {bcn.my_address}")
         my_address = bcn.my_address
         received_address = True
     
     if not received_address:
-        logging.error("Failed to receive valid network address from server. Exiting.")
+        logging.error("❌ Failed to receive valid network address from server. Check server status and network connection.")
         return
     
-    logging.info(f"Successfully connected to BCN network with address: {my_address}")
+    logging.info(f"✅ Successfully connected to BCN network with address: {my_address}")
     logging.info(f"Verification - final EmailCommunicator address: {bcn.my_address}")
     
     # Main loop to process commands
@@ -209,7 +296,7 @@ def initiate_suboard():
                         try:
                             # Отправляем подтверждение ACK серверу
                             bcn.send(
-                                None,
+                                f"Command '{command}' acknowledged by {computer_name}",
                                 "0.0.0",
                                 "ACK",
                                 f"Command '{command}' acknowledged by {computer_name}"
@@ -241,11 +328,14 @@ def initiate_suboard():
                                 logging.error(f"Error sending command result: {send_error}")
                             
                             # Удаляем сообщение с командой после её выполнения
-                            with bcn.create_imap_connection() as mail:
-                                mail.select("INBOX/ToMyself")
-                                mail.store(email_id, "+FLAGS", "\\Deleted")
-                                mail.expunge()
-                                logging.info(f"📮 Deleted command message after execution")
+                            try:
+                                with bcn.create_imap_connection() as mail:
+                                    mail.select("INBOX/ToMyself")
+                                    mail.store(email_id, "+FLAGS", "\\Deleted")
+                                    mail.expunge()
+                                    logging.info(f"📮 Deleted command message after execution")
+                            except Exception as delete_error:
+                                logging.error(f"Error deleting command message: {delete_error}")
                             
                         except subprocess.TimeoutExpired:
                             error_msg = "Command execution timed out after 10 seconds"
@@ -258,11 +348,14 @@ def initiate_suboard():
                             )
                             
                             # Удаляем сообщение с командой после попытки выполнения
-                            with bcn.create_imap_connection() as mail:
-                                mail.select("INBOX/ToMyself")
-                                mail.store(email_id, "+FLAGS", "\\Deleted")
-                                mail.expunge()
-                                logging.info(f"📮 Deleted command message after timeout error")
+                            try:
+                                with bcn.create_imap_connection() as mail:
+                                    mail.select("INBOX/ToMyself")
+                                    mail.store(email_id, "+FLAGS", "\\Deleted")
+                                    mail.expunge()
+                                    logging.info(f"📮 Deleted command message after timeout error")
+                            except Exception as delete_error:
+                                logging.error(f"Error deleting command message after timeout: {delete_error}")
                             
                         except Exception as cmd_error:
                             error_msg = str(cmd_error)
@@ -276,11 +369,14 @@ def initiate_suboard():
                             logging.info("Error message sent to server")
                             
                             # Удаляем сообщение с командой после попытки выполнения
-                            with bcn.create_imap_connection() as mail:
-                                mail.select("INBOX/ToMyself")
-                                mail.store(email_id, "+FLAGS", "\\Deleted")
-                                mail.expunge()
-                                logging.info(f"📮 Deleted command message after execution error")
+                            try:
+                                with bcn.create_imap_connection() as mail:
+                                    mail.select("INBOX/ToMyself")
+                                    mail.store(email_id, "+FLAGS", "\\Deleted")
+                                    mail.expunge()
+                                    logging.info(f"📮 Deleted command message after execution error")
+                            except Exception as delete_error:
+                                logging.error(f"Error deleting command message after error: {delete_error}")
                                 
                 elif isinstance(result, tuple) and len(result) == 2:
                     # Обычный результат (command, flag)
@@ -289,7 +385,46 @@ def initiate_suboard():
                     # Обработка обычных команд (без ID сообщения)
                     if flag == "IC" and command:
                         logging.info(f"Executing command (legacy processing): '{command}'")
-                        # ... existing code for legacy commands ...
+                        # Обрабатываем обычные команды без ID сообщения
+                        try:
+                            # Удаляем символы возврата каретки и перевода строки
+                            command = command.replace('\r', '').replace('\n', '')
+                            
+                            # Отправляем подтверждение ACK серверу
+                            bcn.send(
+                                f"Command '{command}' acknowledged by {computer_name}",
+                                "0.0.0",
+                                "ACK",
+                                f"Command '{command}' acknowledged by {computer_name}"
+                            )
+                            
+                            # Выполняем команду и получаем результат
+                            result = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=10)
+                            
+                            # Обрабатываем результат выполнения
+                            if result.returncode == 0:
+                                output = result.stdout
+                                logging.info(f"Legacy command executed successfully. Output: {output}")
+                            else:
+                                output = f"Error: {result.stderr}"
+                                logging.error(f"Legacy command execution failed with return code {result.returncode}. Error: {result.stderr}")
+                            
+                            # Отправляем результат на сервер
+                            bcn.send(
+                                output,
+                                "0.0.0",
+                                "IR",
+                                f"Legacy command execution result from {computer_name}"
+                            )
+                            
+                        except Exception as legacy_error:
+                            logging.error(f"Error in legacy command processing: {legacy_error}")
+                            bcn.send(
+                                str(legacy_error),
+                                "0.0.0",
+                                "ERR",
+                                f"Legacy command execution failed on {computer_name}"
+                            )
                     elif flag == "EDCN":
                         logging.info("Received emergency disconnect command from server.")
                         break
