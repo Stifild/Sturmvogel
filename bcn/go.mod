@@ -1,4 +1,4 @@
-module github.com/stifild/stormvogel/bcn
+module github.com/stifild/sturmvogel/bcn
 
 go 1.22
 

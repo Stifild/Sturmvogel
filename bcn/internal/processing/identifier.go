@@ -6,7 +6,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/stifild/stormvogel/bcn/internal/utils"
+	"github.com/stifild/sturmvogel/bcn/internal/utils"
 )
 
 // Identifier отвечает за генерацию и управление адресами компьютеров

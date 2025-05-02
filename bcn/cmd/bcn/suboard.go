@@ -11,8 +11,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/stifild/stormvogel/bcn/internal/communication"
-	"github.com/stifild/stormvogel/bcn/internal/utils"
+	"github.com/stifild/sturmvogel/bcn/internal/communication"
+	"github.com/stifild/sturmvogel/bcn/internal/utils"
 )
 
 // Задержка между проверками почты для suboard

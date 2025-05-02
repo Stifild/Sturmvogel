@@ -8,8 +8,8 @@ import (
 	"sync"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
-	"github.com/stifild/stormvogel/bcn/internal/processing"
-	"github.com/stifild/stormvogel/bcn/internal/utils"
+	"github.com/stifild/sturmvogel/bcn/internal/processing"
+	"github.com/stifild/sturmvogel/bcn/internal/utils"
 )
 
 // TelegramCommunicator представляет собой модуль для работы с Telegram-ботом

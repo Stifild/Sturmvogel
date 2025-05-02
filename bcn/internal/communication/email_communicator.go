@@ -15,7 +15,7 @@ import (
 	"github.com/emersion/go-imap/client"
 	"github.com/emersion/go-message/charset"
 	"github.com/emersion/go-sasl"
-	"github.com/stifild/stormvogel/bcn/internal/utils"
+	"github.com/stifild/sturmvogel/bcn/internal/utils"
 	"net/smtp"
 )
 

@@ -10,9 +10,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/stifild/stormvogel/bcn/internal/communication"
-	"github.com/stifild/stormvogel/bcn/internal/processing"
-	"github.com/stifild/stormvogel/bcn/internal/utils"
+	"github.com/stifild/sturmvogel/bcn/internal/communication"
+	"github.com/stifild/sturmvogel/bcn/internal/processing"
+	"github.com/stifild/sturmvogel/bcn/internal/utils"
 )
 
 const (
