@@ -10,30 +10,33 @@ class Identifier:
 
     def generate_address(self, computerInfo: dict):
         """
-        This method generate identification address of computer.
+        This method generates an identification address for a computer.
         """
         io = Utils()
 
-        for address, data, f in self.twmcd.items(), range(255):
-            for s in range(255):
-                for t in range(255):
-                    if address == f"{f}.{s}.{t}":
-                        continue
-                    else:
-                        self.twmcd[f"{f}.{s}.{t}"] = computerInfo
+        for f in range(256):
+            for s in range(256):
+                for t in range(256):
+                    address = f"{f}.{s}.{t}"
+                    if address not in self.twmcd:
+                        self.twmcd[address] = computerInfo
                         io.save_json("./data/twmcd.json", self.twmcd)
-                        return f"{f}.{s}.{t}"
+                        return address
+        raise ValueError("No available addresses in the network.")
 
     def remove_address(self, address: str):
         """
-        This method remove identification address of computer.
+        This method removes an identification address of a computer.
         """
         io = Utils()
-        del self.twmcd[address]
-        io.save_json("./data/twmcd.json", self.twmcd)
+        if address in self.twmcd:
+            del self.twmcd[address]
+            io.save_json("./data/twmcd.json", self.twmcd)
+        else:
+            print(f"Address {address} not found in the dictionary.")
 
     def get_os_by_address(self, address: str):
         """
-        This method get OS of computer by address.
+        This method gets the OS of a computer by address.
         """
-        return self.twmcd[address]["os"]
+        return self.twmcd.get(address, {}).get("os", "Unknown")
